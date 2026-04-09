@@ -96,7 +96,7 @@ export const API = {
     return res.json();
   },
 
-  getDownloadUrl: (documentId: string, format: "word" | "pdf", projectName: string): string => {
+  getDownloadUrl: (documentId: string, format: "word" | "pdf" | "scan", projectName: string): string => {
     const base = getBaseUrl();
     const name = encodeURIComponent(projectName);
     return `${base}/api/documents/${documentId}/download/${format}?name=${name}`;

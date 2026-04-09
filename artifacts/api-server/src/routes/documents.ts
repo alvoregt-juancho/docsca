@@ -2,11 +2,13 @@ import { Router } from "express";
 import { existsSync } from "fs";
 import { generateWordDocument } from "../lib/wordGenerator.js";
 import { generatePdfDocument } from "../lib/pdfGenerator.js";
+import { generateScanPdf } from "../lib/scanPdfGenerator.js";
 import {
   loadAllPages,
   ensureOutputDir,
   wordPath,
   pdfPath,
+  scanPdfPath,
 } from "../lib/tempStorage.js";
 import { isConfigured } from "../lib/documentAiClient.js";
 import { writeFile } from "fs/promises";
@@ -60,6 +62,7 @@ router.post("/generate", async (req, res) => {
 
     const wPath = wordPath(safeProjectId, docId);
     const pPath = pdfPath(safeProjectId, docId);
+    const sPath = scanPdfPath(safeProjectId, docId);
 
     req.log.info({ projectId: safeProjectId, pageCount: pages.length }, "Generating documents");
 
@@ -67,6 +70,7 @@ router.post("/generate", async (req, res) => {
     await writeFile(wPath, wordBuffer);
 
     await generatePdfDocument(pages, projectName, pPath);
+    await generateScanPdf(pages, sPath);
 
     res.json({
       success: true,
@@ -125,6 +129,30 @@ router.get("/:documentId/download/pdf", async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.sendFile(pPath);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+router.get("/:documentId/download/scan", async (req, res) => {
+  try {
+    const documentId = validateId(req.params["documentId"], "documentId");
+    const parts = documentId.split("-");
+    const projectId = parts.slice(0, -1).join("-");
+    validateId(projectId, "projectId (from documentId)");
+    const sPath = scanPdfPath(projectId, documentId);
+
+    if (!existsSync(sPath)) {
+      res.status(404).json({ error: "Scan PDF not found" });
+      return;
+    }
+
+    const raw = (req.query["name"] as string) || "escaneo";
+    const filename = `${raw.replace(/[^a-zA-Z0-9\-_\s]/g, "").trim() || "escaneo"}_scan.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.sendFile(sPath);
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

@@ -108,7 +108,7 @@ export default function ProjectDetailScreen() {
   const { getProject, generateDocument } = useProjectContext();
 
   const [generating, setGenerating] = useState(false);
-  const [downloading, setDownloading] = useState<"word" | "pdf" | null>(null);
+  const [downloading, setDownloading] = useState<"word" | "pdf" | "scan" | null>(null);
 
   const project = getProject(id);
 
@@ -147,12 +147,18 @@ export default function ProjectDetailScreen() {
     }
   };
 
-  const handleDownload = async (format: "word" | "pdf") => {
+  const handleDownload = async (format: "word" | "pdf" | "scan") => {
     if (!project.documentId) return;
     setDownloading(format);
     try {
       const url = API.getDownloadUrl(project.documentId, format, project.name);
-      const filename = `${project.name.replace(/[^a-zA-Z0-9\s]/g, "").trim()}.${format === "word" ? "docx" : "pdf"}`;
+      const baseName = project.name.replace(/[^a-zA-Z0-9\s]/g, "").trim() || "documento";
+      const filename =
+        format === "word"
+          ? `${baseName}.docx`
+          : format === "scan"
+          ? `${baseName}_scan.pdf`
+          : `${baseName}.pdf`;
       const mimeType =
         format === "word"
           ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -273,7 +279,7 @@ export default function ProjectDetailScreen() {
                       color={Colors.primaryForeground}
                     />
                     <Text style={styles.generateBtnText}>
-                      Generar Word y PDF
+                      Generar Word, PDF y Escaneo
                     </Text>
                   </>
                 )}
@@ -330,7 +336,25 @@ export default function ProjectDetailScreen() {
                   <Text style={styles.downloadBtnText}>
                     {downloading === "pdf"
                       ? "Descargando..."
-                      : "Descargar PDF"}
+                      : "Descargar PDF (OCR)"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.downloadBtn, styles.downloadScan]}
+                  onPress={() => handleDownload("scan")}
+                  disabled={downloading !== null}
+                  activeOpacity={0.8}
+                >
+                  {downloading === "scan" ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Feather name="image" size={20} color="#FFFFFF" />
+                  )}
+                  <Text style={styles.downloadBtnText}>
+                    {downloading === "scan"
+                      ? "Descargando..."
+                      : "Descargar Escaneo PDF"}
                   </Text>
                 </TouchableOpacity>
 
@@ -557,6 +581,7 @@ const styles = StyleSheet.create({
   },
   downloadWord: { backgroundColor: "#2563EB" },
   downloadPdf: { backgroundColor: "#DC2626" },
+  downloadScan: { backgroundColor: "#059669" },
   downloadBtnText: {
     color: "#FFFFFF",
     fontSize: 15,

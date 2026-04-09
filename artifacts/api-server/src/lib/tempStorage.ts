@@ -118,6 +118,10 @@ export function pdfPath(projectId: string, docId: string): string {
   return join(outputDir(projectId), `${sanitizeId(docId)}.pdf`);
 }
 
+export function scanPdfPath(projectId: string, docId: string): string {
+  return join(outputDir(projectId), `${sanitizeId(docId)}_scan.pdf`);
+}
+
 /**
  * Sort pages using detected page numbers as anchors, then interpolate
  * integer page numbers for unnumbered pages based on their capture-order
