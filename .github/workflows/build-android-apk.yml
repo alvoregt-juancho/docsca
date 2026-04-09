@@ -1,0 +1,63 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Android project (expo prebuild)
+        working-directory: artifacts/mobile
+        run: |
+          pnpm exec expo prebuild --platform android --no-install --clean
+        env:
+          EXPO_NO_GIT_STATUS: 1
+
+      - name: Make gradlew executable
+        working-directory: artifacts/mobile/android
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        working-directory: artifacts/mobile/android
+        run: |
+          ./gradlew assembleDebug \
+            -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m" \
+            -Dorg.gradle.daemon=false \
+            --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: docscan-debug-apk
+          path: artifacts/mobile/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
