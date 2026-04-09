@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "DocScan",
-    "slug": "mobile",
+    "slug": "docscan-book-scanner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "docscan",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -17,8 +17,10 @@
       "supportsTablet": false
     },
     "android": {
+      "package": "com.alvoregt.docscan",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -43,6 +45,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f0350cd1-7f1f-4fc7-a6f1-e11f573bc5a3"
+      }
+    },
+    "owner": "alvoregt"
   }
 }
