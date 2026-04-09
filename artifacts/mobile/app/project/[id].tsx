@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import { cacheDirectory, downloadAsync } from "expo-file-system/build/legacy";
+import { File, Paths } from "expo-file-system";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useState } from "react";
@@ -84,18 +84,14 @@ async function downloadFile(
   filename: string,
   mimeType: string,
 ): Promise<void> {
-  const localUri = `${cacheDirectory ?? "/tmp/"}${filename}`;
-  const result = await downloadAsync(url, localUri, {
-    headers: { Accept: mimeType },
-  });
-  if (result.status !== 200) {
-    throw new Error(`Descarga fallida: ${result.status}`);
-  }
+  const dest = new File(Paths.cache, filename);
+  const downloaded = await File.downloadFileAsync(url, dest);
+
   const available = await Sharing.isAvailableAsync();
   if (!available) {
     throw new Error("Compartir no disponible en este dispositivo");
   }
-  await Sharing.shareAsync(result.uri, {
+  await Sharing.shareAsync(downloaded.uri, {
     mimeType,
     dialogTitle: `Guardar ${filename}`,
     UTI: filename.endsWith(".docx") ? "org.openxmlformats.wordprocessingml.document" : "com.adobe.pdf",
