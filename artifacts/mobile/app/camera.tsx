@@ -212,38 +212,68 @@ export default function CameraScreen() {
     if (!photo || !projectId || !displayRect) return;
     setUploading(true);
     try {
-      const { offsetX, offsetY, dispW, dispH, scale } = displayRect;
+      const { offsetX, offsetY, scale } = displayRect;
 
       // Convert screen corner positions to image pixel coordinates
-      const allX = [corners.tl.x, corners.tr.x, corners.bl.x, corners.br.x];
-      const allY = [corners.tl.y, corners.tr.y, corners.bl.y, corners.br.y];
+      function toImg(pt: Point): Point {
+        return {
+          x: (pt.x - offsetX) / scale,
+          y: (pt.y - offsetY) / scale,
+        };
+      }
 
-      const minScreenX = Math.min(...allX);
-      const maxScreenX = Math.max(...allX);
-      const minScreenY = Math.min(...allY);
-      const maxScreenY = Math.max(...allY);
+      const imgTL = toImg(corners.tl);
+      const imgTR = toImg(corners.tr);
+      const imgBL = toImg(corners.bl);
+      const imgBR = toImg(corners.br);
 
-      // Map from screen coords to original image pixel coords
-      const originX = Math.max(0, (minScreenX - offsetX) / scale);
-      const originY = Math.max(0, (minScreenY - offsetY) / scale);
-      const cropW = Math.min(photo.width - originX, (maxScreenX - minScreenX) / scale);
-      const cropH = Math.min(photo.height - originY, (maxScreenY - minScreenY) / scale);
+      // Calculate average tilt angle from top + bottom edges for perspective correction
+      const topAngle = Math.atan2(imgTR.y - imgTL.y, imgTR.x - imgTL.x);
+      const bottomAngle = Math.atan2(imgBR.y - imgBL.y, imgBR.x - imgBL.x);
+      const tiltDeg = -((topAngle + bottomAngle) / 2) * (180 / Math.PI);
 
-      const result = await manipulateAsync(
-        photo.uri,
-        [
-          {
-            crop: {
-              originX: Math.floor(originX),
-              originY: Math.floor(originY),
-              width: Math.floor(cropW),
-              height: Math.floor(cropH),
-            },
-          },
-          { resize: { width: 1200 } },
-        ],
-        { compress: 0.82, format: SaveFormat.JPEG, base64: true },
-      );
+      // After rotation, recalculate corner positions in the new image space
+      const rad = (tiltDeg * Math.PI) / 180;
+      const cosR = Math.abs(Math.cos(rad));
+      const sinR = Math.abs(Math.sin(rad));
+      const newW = photo.width * cosR + photo.height * sinR;
+      const newH = photo.width * sinR + photo.height * cosR;
+      const ox = (newW - photo.width) / 2;
+      const oy = (newH - photo.height) / 2;
+      const cx = photo.width / 2;
+      const cy = photo.height / 2;
+
+      function rotPt(p: Point): Point {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        return {
+          x: dx * Math.cos(rad) - dy * Math.sin(rad) + cx + ox,
+          y: dx * Math.sin(rad) + dy * Math.cos(rad) + cy + oy,
+        };
+      }
+
+      const pts = [imgTL, imgTR, imgBL, imgBR].map(rotPt);
+      const minX = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.x))));
+      const minY = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.y))));
+      const maxX = Math.min(newW, Math.ceil(Math.max(...pts.map((p) => p.x))));
+      const maxY = Math.min(newH, Math.ceil(Math.max(...pts.map((p) => p.y))));
+      const cropW = Math.max(1, maxX - minX);
+      const cropH = Math.max(1, maxY - minY);
+
+      const actions: Parameters<typeof manipulateAsync>[1] = [];
+      if (Math.abs(tiltDeg) > 0.5) {
+        actions.push({ rotate: tiltDeg });
+      }
+      actions.push({
+        crop: { originX: minX, originY: minY, width: cropW, height: cropH },
+      });
+      actions.push({ resize: { width: 1200 } });
+
+      const result = await manipulateAsync(photo.uri, actions, {
+        compress: 0.82,
+        format: SaveFormat.JPEG,
+        base64: true,
+      });
 
       const base64 = result.base64;
       if (!base64) throw new Error("No se pudo comprimir la imagen");

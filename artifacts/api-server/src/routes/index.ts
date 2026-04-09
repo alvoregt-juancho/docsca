@@ -7,6 +7,7 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use("/pages", pagesRouter);
+router.use("/ocr", pagesRouter);
 router.use("/documents", documentsRouter);
 
 export default router;

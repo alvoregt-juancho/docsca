@@ -97,6 +97,7 @@ async function buildPageChildren(
             spacing: { before: 200, after: 200 },
             children: [
               new ImageRun({
+                type: "jpg",
                 data: imgBuffer,
                 transformation: {
                   width: Math.max(targetWidth, 100),

@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system";
+import { cacheDirectory, downloadAsync } from "expo-file-system/build/legacy";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useState } from "react";
@@ -84,8 +84,8 @@ async function downloadFile(
   filename: string,
   mimeType: string,
 ): Promise<void> {
-  const localUri = `${FileSystem.cacheDirectory}${filename}`;
-  const result = await FileSystem.downloadAsync(url, localUri, {
+  const localUri = `${cacheDirectory ?? "/tmp/"}${filename}`;
+  const result = await downloadAsync(url, localUri, {
     headers: { Accept: mimeType },
   });
   if (result.status !== 200) {
