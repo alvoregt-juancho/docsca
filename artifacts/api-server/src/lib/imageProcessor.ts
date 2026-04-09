@@ -8,6 +8,7 @@ export async function cropImageRegion(
   try {
     const imageBuffer = await readFile(imagePath);
     const Jimp = (await import("jimp")).default;
+    const MIME_JPEG = "image/jpeg";
 
     const image = await Jimp.read(imageBuffer);
     const imgWidth = image.getWidth();
@@ -26,7 +27,7 @@ export async function cropImageRegion(
     if (safeW <= 0 || safeH <= 0) return null;
 
     image.crop(safeX, safeY, safeW, safeH);
-    return image.getBufferAsync("image/jpeg" as any);
+    return image.getBufferAsync(MIME_JPEG);
   } catch {
     return null;
   }

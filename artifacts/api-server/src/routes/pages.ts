@@ -4,6 +4,19 @@ import { storePage } from "../lib/tempStorage.js";
 
 const router = Router();
 
+const SAFE_ID_RE = /^[a-zA-Z0-9_\-]{1,128}$/;
+
+function validateProjectId(id: string): string {
+  if (!SAFE_ID_RE.test(id)) {
+    throw new Error(
+      'Invalid projectId: must be alphanumeric, hyphens, or underscores only'
+    );
+  }
+  return id;
+}
+
+const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 router.post("/process", async (req, res) => {
   const { imageBase64, projectId, captureOrder, mimeType = "image/jpeg" } = req.body as {
     imageBase64?: string;
@@ -17,14 +30,19 @@ router.post("/process", async (req, res) => {
     return;
   }
 
-  try {
-    const ocrResult = await processPageWithOcr(imageBase64, mimeType);
+  const resolvedMime = ALLOWED_MIME.has(mimeType ?? "") ? mimeType : "image/jpeg";
 
-    const pageId = `${projectId}-${captureOrder}`;
+  try {
+    const safeProjectId = validateProjectId(projectId);
+    const safeOrder = Math.max(0, Math.floor(Number(captureOrder)));
+
+    const ocrResult = await processPageWithOcr(imageBase64, resolvedMime);
+
+    const pageId = `${safeProjectId}-${safeOrder}`;
     const page = {
       pageId,
-      projectId,
-      captureOrder,
+      projectId: safeProjectId,
+      captureOrder: safeOrder,
       detectedPageNumber: ocrResult.detectedPageNumber,
       text: ocrResult.text,
       paragraphs: ocrResult.paragraphs,
@@ -49,7 +67,8 @@ router.post("/process", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Failed to process page");
-    res.status(500).json({ error: (err as Error).message });
+    const status = (err as Error).message.startsWith("Invalid") ? 400 : 500;
+    res.status(status).json({ error: (err as Error).message });
   }
 });
 

@@ -13,6 +13,15 @@ import { writeFile } from "fs/promises";
 
 const router = Router();
 
+const SAFE_ID_RE = /^[a-zA-Z0-9_\-]{1,256}$/;
+
+function validateId(id: string | undefined, label: string): string {
+  if (!id || !SAFE_ID_RE.test(id)) {
+    throw new Error(`Invalid ${label}: must be alphanumeric, hyphens, or underscores only`);
+  }
+  return id;
+}
+
 router.get("/config", (_req, res) => {
   res.json({
     configured: isConfigured(),
@@ -37,19 +46,22 @@ router.post("/generate", async (req, res) => {
   }
 
   try {
-    const pages = await loadAllPages(projectId);
+    const safeProjectId = validateId(projectId, "projectId");
+
+    const pages = await loadAllPages(safeProjectId);
     if (pages.length === 0) {
       res.status(400).json({ error: "No pages found for this project" });
       return;
     }
 
-    const docId = `${projectId}-${Date.now()}`;
-    const outDir = await ensureOutputDir(projectId);
+    const timestamp = Date.now();
+    const docId = `${safeProjectId}-${timestamp}`;
+    await ensureOutputDir(safeProjectId);
 
-    const wPath = wordPath(projectId, docId);
-    const pPath = pdfPath(projectId, docId);
+    const wPath = wordPath(safeProjectId, docId);
+    const pPath = pdfPath(safeProjectId, docId);
 
-    req.log.info({ projectId, pageCount: pages.length }, "Generating documents");
+    req.log.info({ projectId: safeProjectId, pageCount: pages.length }, "Generating documents");
 
     const wordBuffer = await generateWordDocument(pages, projectName);
     await writeFile(wPath, wordBuffer);
@@ -60,8 +72,6 @@ router.post("/generate", async (req, res) => {
       success: true,
       documentId: docId,
       pageCount: pages.length,
-      wordPath: wPath,
-      pdfPath: pPath,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to generate document");
@@ -70,42 +80,54 @@ router.post("/generate", async (req, res) => {
 });
 
 router.get("/:documentId/download/word", async (req, res) => {
-  const { documentId } = req.params;
-  const projectId = documentId.split("-").slice(0, -1).join("-");
-  const wPath = wordPath(projectId, documentId);
+  try {
+    const documentId = validateId(req.params["documentId"], "documentId");
+    const parts = documentId.split("-");
+    const projectId = parts.slice(0, -1).join("-");
+    validateId(projectId, "projectId (from documentId)");
+    const wPath = wordPath(projectId, documentId);
 
-  if (!existsSync(wPath)) {
-    res.status(404).json({ error: "Word document not found" });
-    return;
+    if (!existsSync(wPath)) {
+      res.status(404).json({ error: "Word document not found" });
+      return;
+    }
+
+    const raw = (req.query["name"] as string) || "documento";
+    const filename = `${raw.replace(/[^a-zA-Z0-9\-_\s]/g, "").trim() || "documento"}.docx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.sendFile(wPath);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
   }
-
-  const safeProjectName = (req.query["name"] as string) || "documento";
-  const filename = `${safeProjectName.replace(/[^a-zA-Z0-9\-_\s]/g, "").trim() || "documento"}.docx`;
-
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  );
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.sendFile(wPath);
 });
 
 router.get("/:documentId/download/pdf", async (req, res) => {
-  const { documentId } = req.params;
-  const projectId = documentId.split("-").slice(0, -1).join("-");
-  const pPath = pdfPath(projectId, documentId);
+  try {
+    const documentId = validateId(req.params["documentId"], "documentId");
+    const parts = documentId.split("-");
+    const projectId = parts.slice(0, -1).join("-");
+    validateId(projectId, "projectId (from documentId)");
+    const pPath = pdfPath(projectId, documentId);
 
-  if (!existsSync(pPath)) {
-    res.status(404).json({ error: "PDF document not found" });
-    return;
+    if (!existsSync(pPath)) {
+      res.status(404).json({ error: "PDF document not found" });
+      return;
+    }
+
+    const raw = (req.query["name"] as string) || "documento";
+    const filename = `${raw.replace(/[^a-zA-Z0-9\-_\s]/g, "").trim() || "documento"}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.sendFile(pPath);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
   }
-
-  const safeProjectName = (req.query["name"] as string) || "documento";
-  const filename = `${safeProjectName.replace(/[^a-zA-Z0-9\-_\s]/g, "").trim() || "documento"}.pdf`;
-
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.sendFile(pPath);
 });
 
 export default router;

@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import * as ImageManipulator from "expo-image-manipulator";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
 import {
@@ -8,6 +8,7 @@ import {
   Alert,
   Dimensions,
   Image,
+  PanResponder,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -19,12 +20,37 @@ import { Colors } from "@/constants/colors";
 import { useProjectContext } from "@/context/ProjectContext";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
 const FRAME_W = SCREEN_W * 0.85;
 const FRAME_H = FRAME_W * 1.35;
 const FRAME_X = (SCREEN_W - FRAME_W) / 2;
 const FRAME_Y = (SCREEN_H - FRAME_H) / 2 - 40;
 const CORNER = 28;
 const BORDER = 3;
+
+const HANDLE_SIZE = 32;
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface PhotoState {
+  uri: string;
+  width: number;
+  height: number;
+}
+
+function calcDisplayRect(photoW: number, photoH: number) {
+  const scaleX = SCREEN_W / photoW;
+  const scaleY = SCREEN_H / photoH;
+  const scale = Math.min(scaleX, scaleY);
+  const dispW = photoW * scale;
+  const dispH = photoH * scale;
+  const offsetX = (SCREEN_W - dispW) / 2;
+  const offsetY = (SCREEN_H - dispH) / 2;
+  return { dispW, dispH, offsetX, offsetY, scale };
+}
 
 function DocumentFrame() {
   return (
@@ -42,6 +68,27 @@ function DocumentFrame() {
   );
 }
 
+function CornerHandle({
+  pos,
+  panResponder,
+}: {
+  pos: Point;
+  panResponder: ReturnType<typeof PanResponder.create>;
+}) {
+  return (
+    <View
+      {...panResponder.panHandlers}
+      style={[
+        styles.handle,
+        {
+          left: pos.x - HANDLE_SIZE / 2,
+          top: pos.y - HANDLE_SIZE / 2,
+        },
+      ]}
+    />
+  );
+}
+
 export default function CameraScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>();
   const router = useRouter();
@@ -49,8 +96,64 @@ export default function CameraScreen() {
 
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<PhotoState | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // Perspective selection state (screen pixel coordinates)
+  const [corners, setCorners] = useState({
+    tl: { x: 0, y: 0 },
+    tr: { x: 0, y: 0 },
+    bl: { x: 0, y: 0 },
+    br: { x: 0, y: 0 },
+  });
+
+  const displayRect = photo
+    ? calcDisplayRect(photo.width, photo.height)
+    : null;
+
+  const cornersRef = useRef(corners);
+  cornersRef.current = corners;
+
+  const startRef = useRef({
+    tl: { x: 0, y: 0 },
+    tr: { x: 0, y: 0 },
+    bl: { x: 0, y: 0 },
+    br: { x: 0, y: 0 },
+  });
+
+  function makePR(key: "tl" | "tr" | "bl" | "br") {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        startRef.current[key] = { ...cornersRef.current[key] };
+      },
+      onPanResponderMove: (_, gs) => {
+        if (!displayRect) return;
+        const sx = startRef.current[key].x + gs.dx;
+        const sy = startRef.current[key].y + gs.dy;
+        const clampedX = Math.max(
+          displayRect.offsetX,
+          Math.min(displayRect.offsetX + displayRect.dispW, sx),
+        );
+        const clampedY = Math.max(
+          displayRect.offsetY,
+          Math.min(displayRect.offsetY + displayRect.dispH, sy),
+        );
+        setCorners((prev) => ({
+          ...prev,
+          [key]: { x: clampedX, y: clampedY },
+        }));
+      },
+    });
+  }
+
+  const panResponders = useRef({
+    tl: makePR("tl"),
+    tr: makePR("tr"),
+    bl: makePR("bl"),
+    br: makePR("br"),
+  }).current;
 
   if (!permission) {
     return (
@@ -66,7 +169,7 @@ export default function CameraScreen() {
         <Feather name="camera-off" size={60} color="#999" />
         <Text style={styles.permTitle}>Acceso a cámara necesario</Text>
         <Text style={styles.permText}>
-          Esta app necesita acceso a la cámara para fotografiar documentos.
+          Esta app necesita la cámara para fotografiar documentos.
         </Text>
         <TouchableOpacity
           style={styles.permBtn}
@@ -75,10 +178,7 @@ export default function CameraScreen() {
         >
           <Text style={styles.permBtnText}>Conceder acceso</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.permCancel}
-          onPress={() => router.back()}
-        >
+        <TouchableOpacity style={styles.permCancel} onPress={() => router.back()}>
           <Text style={styles.permCancelText}>Cancelar</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -88,50 +188,119 @@ export default function CameraScreen() {
   const handleCapture = async () => {
     if (!cameraRef.current) return;
     try {
-      const photo = await cameraRef.current.takePictureAsync({
+      const result = await cameraRef.current.takePictureAsync({
         quality: 0.9,
         exif: false,
       });
-      if (photo?.uri) setPhotoUri(photo.uri);
-    } catch (err) {
+      if (!result) return;
+      const { uri, width, height } = result;
+      const rect = calcDisplayRect(width, height);
+      const margin = 0.06;
+      setPhoto({ uri, width, height });
+      setCorners({
+        tl: { x: rect.offsetX + rect.dispW * margin, y: rect.offsetY + rect.dispH * margin },
+        tr: { x: rect.offsetX + rect.dispW * (1 - margin), y: rect.offsetY + rect.dispH * margin },
+        bl: { x: rect.offsetX + rect.dispW * margin, y: rect.offsetY + rect.dispH * (1 - margin) },
+        br: { x: rect.offsetX + rect.dispW * (1 - margin), y: rect.offsetY + rect.dispH * (1 - margin) },
+      });
+    } catch {
       Alert.alert("Error", "No se pudo tomar la foto");
     }
   };
 
   const handleConfirm = async () => {
-    if (!photoUri || !projectId) return;
+    if (!photo || !projectId || !displayRect) return;
     setUploading(true);
     try {
-      const compressed = await ImageManipulator.manipulateAsync(
-        photoUri,
-        [{ resize: { width: 1200 } }],
-        {
-          compress: 0.82,
-          format: ImageManipulator.SaveFormat.JPEG,
-          base64: true,
-        },
+      const { offsetX, offsetY, dispW, dispH, scale } = displayRect;
+
+      // Convert screen corner positions to image pixel coordinates
+      const allX = [corners.tl.x, corners.tr.x, corners.bl.x, corners.br.x];
+      const allY = [corners.tl.y, corners.tr.y, corners.bl.y, corners.br.y];
+
+      const minScreenX = Math.min(...allX);
+      const maxScreenX = Math.max(...allX);
+      const minScreenY = Math.min(...allY);
+      const maxScreenY = Math.max(...allY);
+
+      // Map from screen coords to original image pixel coords
+      const originX = Math.max(0, (minScreenX - offsetX) / scale);
+      const originY = Math.max(0, (minScreenY - offsetY) / scale);
+      const cropW = Math.min(photo.width - originX, (maxScreenX - minScreenX) / scale);
+      const cropH = Math.min(photo.height - originY, (maxScreenY - minScreenY) / scale);
+
+      const result = await manipulateAsync(
+        photo.uri,
+        [
+          {
+            crop: {
+              originX: Math.floor(originX),
+              originY: Math.floor(originY),
+              width: Math.floor(cropW),
+              height: Math.floor(cropH),
+            },
+          },
+          { resize: { width: 1200 } },
+        ],
+        { compress: 0.82, format: SaveFormat.JPEG, base64: true },
       );
 
-      const base64 = compressed.base64;
+      const base64 = result.base64;
       if (!base64) throw new Error("No se pudo comprimir la imagen");
 
       await addPage(projectId, base64);
       router.back();
     } catch (err) {
       setUploading(false);
-      Alert.alert("Error", (err as Error).message || "No se pudo subir la página");
+      Alert.alert(
+        "Error",
+        (err as Error).message || "No se pudo procesar la página",
+      );
     }
   };
 
-  const handleRetake = () => setPhotoUri(null);
+  const handleRetake = () => setPhoto(null);
 
-  if (photoUri) {
+  if (photo && displayRect) {
     return (
       <View style={styles.preview}>
-        <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+        <Image
+          source={{ uri: photo.uri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="contain"
+        />
+
+        {/* Perspective selection overlay */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          {/* Dimmed overlay outside selection */}
+          <View
+            style={[
+              styles.selectionOverlay,
+              {
+                left: corners.tl.x,
+                top: corners.tl.y,
+                right: SCREEN_W - corners.br.x,
+                bottom: SCREEN_H - corners.br.y,
+              },
+            ]}
+            pointerEvents="none"
+          />
+
+          {(["tl", "tr", "bl", "br"] as const).map((key) => (
+            <CornerHandle
+              key={key}
+              pos={corners[key]}
+              panResponder={panResponders[key]}
+            />
+          ))}
+        </View>
+
         <SafeAreaView style={styles.previewOverlay} edges={["top", "bottom"]}>
           <View style={styles.previewHeader}>
-            <Text style={styles.previewTitle}>Vista previa</Text>
+            <Text style={styles.previewTitle}>Ajusta el documento</Text>
+            <Text style={styles.previewHint}>
+              Arrastra las esquinas azules para alinear el documento
+            </Text>
           </View>
           <View style={{ flex: 1 }} />
           {uploading ? (
@@ -168,9 +337,7 @@ export default function CameraScreen() {
     <View style={styles.camera}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
       <View style={styles.overlay}>
-        <View
-          style={[styles.darkArea, { height: FRAME_Y }]}
-        />
+        <View style={[styles.darkArea, { height: FRAME_Y }]} />
         <View style={{ flexDirection: "row", height: FRAME_H }}>
           <View style={[styles.darkArea, { width: FRAME_X }]} />
           <View style={{ width: FRAME_W, height: FRAME_H }} />
@@ -249,15 +416,8 @@ const styles = StyleSheet.create({
   camera: { flex: 1, backgroundColor: "#000" },
   overlay: { ...StyleSheet.absoluteFillObject, flexDirection: "column" },
   darkArea: { backgroundColor: "rgba(0,0,0,0.6)" },
-  frame: {
-    position: "absolute",
-    borderWidth: 0,
-  },
-  corner: {
-    position: "absolute",
-    width: CORNER,
-    height: CORNER,
-  },
+  frame: { position: "absolute" },
+  corner: { position: "absolute", width: CORNER, height: CORNER },
   tl: {
     top: 0,
     left: 0,
@@ -290,10 +450,7 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF",
     borderBottomRightRadius: 4,
   },
-  cameraUI: {
-    ...StyleSheet.absoluteFillObject,
-    flexDirection: "column",
-  },
+  cameraUI: { ...StyleSheet.absoluteFillObject },
   cameraHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -316,10 +473,7 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  captureRow: {
-    alignItems: "center",
-    paddingBottom: 30,
-  },
+  captureRow: { alignItems: "center", paddingBottom: 30 },
   captureBtn: {
     width: 76,
     height: 76,
@@ -340,17 +494,46 @@ const styles = StyleSheet.create({
   previewOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "transparent",
+    pointerEvents: "box-none",
   },
   previewHeader: {
     alignItems: "center",
     paddingTop: 20,
-    paddingBottom: 16,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    gap: 4,
   },
   previewTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
+  },
+  previewHint: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.7)",
+    textAlign: "center",
+  },
+  selectionOverlay: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    backgroundColor: "transparent",
+  },
+  handle: {
+    position: "absolute",
+    width: HANDLE_SIZE,
+    height: HANDLE_SIZE,
+    borderRadius: HANDLE_SIZE / 2,
+    backgroundColor: Colors.primary,
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 6,
   },
   uploadingBox: {
     alignItems: "center",
