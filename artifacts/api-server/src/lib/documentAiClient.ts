@@ -4,7 +4,6 @@ const ENV_PROJECT_ID = process.env["GOOGLE_CLOUD_PROJECT_ID"] || "";
 const ENV_LOCATION = process.env["GOOGLE_CLOUD_LOCATION"] || "us";
 const ENV_PROCESSOR_ID = process.env["GOOGLE_DOCUMENT_AI_PROCESSOR_ID"] || "";
 const ENV_CREDENTIALS_JSON = process.env["GOOGLE_APPLICATION_CREDENTIALS_JSON"] || "";
-const ENV_API_KEY = process.env["GOOGLE_CLOUD_API_KEY"] || "";
 
 export interface UserCredentials {
   gcpProjectId?: string;
@@ -14,9 +13,15 @@ export interface UserCredentials {
   location?: string;
 }
 
+/**
+ * Returns true when all credentials needed to call Document AI are present.
+ * Document AI v1 requires OAuth2 service-account credentials — API keys are
+ * not supported by this API. User-supplied serviceAccountJson takes priority
+ * over server-side GOOGLE_APPLICATION_CREDENTIALS_JSON env var.
+ */
 export function isConfigured(creds?: UserCredentials): boolean {
   if (creds?.gcpProjectId && creds?.processorId && creds?.serviceAccountJson) return true;
-  return !!(ENV_PROJECT_ID && ENV_PROCESSOR_ID && (ENV_CREDENTIALS_JSON || ENV_API_KEY));
+  return !!(ENV_PROJECT_ID && ENV_PROCESSOR_ID && ENV_CREDENTIALS_JSON);
 }
 
 export interface OcrPageResult {
@@ -42,8 +47,10 @@ export async function processPageWithOcr(
   const projectId = userCreds?.gcpProjectId || ENV_PROJECT_ID;
   const processorId = userCreds?.processorId || ENV_PROCESSOR_ID;
   const location = userCreds?.location || ENV_LOCATION || "us";
-  // Use service account JSON: prefer user-provided, fall back to env var
+  // Prefer user-supplied service account JSON, fall back to server env var
   const credJson = userCreds?.serviceAccountJson || ENV_CREDENTIALS_JSON;
+  // Safety guard: if credJson is somehow empty, fall back to mock
+  if (!credJson) return generateMockOcrResult();
 
   try {
     const { DocumentProcessorServiceClient } = await import("@google-cloud/documentai");
