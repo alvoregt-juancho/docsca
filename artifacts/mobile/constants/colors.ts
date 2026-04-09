@@ -1,0 +1,46 @@
+const colors = {
+  light: {
+    text: "#0F172A",
+    tint: "#2563EB",
+    background: "#EEF2FF",
+    foreground: "#0F172A",
+    card: "#FFFFFF",
+    cardForeground: "#0F172A",
+    primary: "#2563EB",
+    primaryForeground: "#FFFFFF",
+    secondary: "#DBEAFE",
+    secondaryForeground: "#1E40AF",
+    muted: "#F1F5F9",
+    mutedForeground: "#64748B",
+    accent: "#DBEAFE",
+    accentForeground: "#1E40AF",
+    destructive: "#DC2626",
+    destructiveForeground: "#FFFFFF",
+    border: "#E2E8F0",
+    input: "#E2E8F0",
+  },
+  radius: 12,
+};
+
+export default colors;
+
+export const Colors = {
+  primary: "#2563EB",
+  primaryDark: "#1D4ED8",
+  primaryForeground: "#FFFFFF",
+  secondary: "#DBEAFE",
+  secondaryForeground: "#1E40AF",
+  background: "#EEF2FF",
+  surface: "#FFFFFF",
+  text: "#0F172A",
+  textMuted: "#64748B",
+  textLight: "#94A3B8",
+  border: "#E2E8F0",
+  success: "#16A34A",
+  successLight: "#DCFCE7",
+  error: "#DC2626",
+  errorLight: "#FEE2E2",
+  warning: "#D97706",
+  warningLight: "#FEF3C7",
+  shadow: "#000000",
+} as const;
