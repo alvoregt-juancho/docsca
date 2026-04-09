@@ -23,3 +23,16 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 });
+
+// In Replit's deployed environment, external HTTPS traffic is routed to port
+// 8081 (externalPort = 80 in .replit). Listen there too so the deployed API
+// is reachable without editing the platform port config.
+if (process.env["REPLIT_ENVIRONMENT"] === "production" && port !== 8081) {
+  app.listen(8081, (err) => {
+    if (err) {
+      logger.warn({ err }, "Could not bind secondary port 8081");
+      return;
+    }
+    logger.info({ port: 8081 }, "Server also listening on primary external port");
+  });
+}
