@@ -30,8 +30,11 @@ const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
  *   mimeType      string   Optional. Default "image/jpeg".
  *   corners       object   Optional. { tl, tr, bl, br } each { x, y } in image pixels.
  *                          When provided, a perspective warp is applied before OCR.
- *   credentials   object   Optional. { gcpProjectId, processorId, apiKey } for
- *                          user-supplied Google Cloud credentials.
+ *   credentials   object   Optional. { gcpProjectId, processorId, serviceAccountJson }
+ *                          for user-supplied Google Cloud service-account credentials.
+ *                          serviceAccountJson must be the full JSON content of a GCP
+ *                          service account key file (not an API key — Document AI v1
+ *                          does not support API keys).
  */
 router.post("/", async (req, res) => {
   const {

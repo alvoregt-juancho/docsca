@@ -307,8 +307,9 @@ export default function SettingsScreen() {
               <View style={styles.tipBox}>
                 <Feather name="info" size={14} color={Colors.primary} />
                 <Text style={styles.tipText}>
-                  Sin credenciales la app funciona con datos de muestra. Obtén una API
-                  Key en console.cloud.google.com → Credenciales.
+                  Sin credenciales la app usa datos de muestra. Para OCR real, crea una
+                  cuenta de servicio en console.cloud.google.com → IAM y administración
+                  → Cuentas de servicio, y descarga el archivo JSON de clave.
                 </Text>
               </View>
             </View>
