@@ -107,12 +107,45 @@ function serveStaticFile(urlPath, res) {
 const landingPageTemplate = fs.readFileSync(TEMPLATE_PATH, "utf-8");
 const appName = getAppName();
 
+// Forward /api/* requests to the API server running on port 8080.
+// In Replit's deployed environment all external traffic hits this static
+// server (port 18115), so we transparently proxy API calls here.
+const API_PORT = parseInt(process.env.API_PORT || "8080", 10);
+
+function proxyToApi(req, res) {
+  const options = {
+    hostname: "localhost",
+    port: API_PORT,
+    path: req.url,
+    method: req.method,
+    headers: { ...req.headers, host: `localhost:${API_PORT}` },
+  };
+
+  const proxyReq = http.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+  });
+
+  proxyReq.on("error", (err) => {
+    console.error("API proxy error:", err.message);
+    res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "API server unavailable" }));
+  });
+
+  req.pipe(proxyReq, { end: true });
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
   let pathname = url.pathname;
 
   if (basePath && pathname.startsWith(basePath)) {
     pathname = pathname.slice(basePath.length) || "/";
+  }
+
+  // Proxy all /api/* calls to the API server
+  if (pathname.startsWith("/api")) {
+    return proxyToApi(req, res);
   }
 
   if (pathname === "/" || pathname === "/manifest") {
