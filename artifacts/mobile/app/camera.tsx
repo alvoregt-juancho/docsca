@@ -214,71 +214,33 @@ export default function CameraScreen() {
     try {
       const { offsetX, offsetY, scale } = displayRect;
 
-      // Convert screen corner positions to image pixel coordinates
-      function toImg(pt: Point): Point {
-        return {
-          x: (pt.x - offsetX) / scale,
-          y: (pt.y - offsetY) / scale,
-        };
-      }
-
-      const imgTL = toImg(corners.tl);
-      const imgTR = toImg(corners.tr);
-      const imgBL = toImg(corners.bl);
-      const imgBR = toImg(corners.br);
-
-      // Calculate average tilt angle from top + bottom edges for perspective correction
-      const topAngle = Math.atan2(imgTR.y - imgTL.y, imgTR.x - imgTL.x);
-      const bottomAngle = Math.atan2(imgBR.y - imgBL.y, imgBR.x - imgBL.x);
-      const tiltDeg = -((topAngle + bottomAngle) / 2) * (180 / Math.PI);
-
-      // After rotation, recalculate corner positions in the new image space
-      const rad = (tiltDeg * Math.PI) / 180;
-      const cosR = Math.abs(Math.cos(rad));
-      const sinR = Math.abs(Math.sin(rad));
-      const newW = photo.width * cosR + photo.height * sinR;
-      const newH = photo.width * sinR + photo.height * cosR;
-      const ox = (newW - photo.width) / 2;
-      const oy = (newH - photo.height) / 2;
-      const cx = photo.width / 2;
-      const cy = photo.height / 2;
-
-      function rotPt(p: Point): Point {
-        const dx = p.x - cx;
-        const dy = p.y - cy;
-        return {
-          x: dx * Math.cos(rad) - dy * Math.sin(rad) + cx + ox,
-          y: dx * Math.sin(rad) + dy * Math.cos(rad) + cy + oy,
-        };
-      }
-
-      const pts = [imgTL, imgTR, imgBL, imgBR].map(rotPt);
-      const minX = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.x))));
-      const minY = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.y))));
-      const maxX = Math.min(newW, Math.ceil(Math.max(...pts.map((p) => p.x))));
-      const maxY = Math.min(newH, Math.ceil(Math.max(...pts.map((p) => p.y))));
-      const cropW = Math.max(1, maxX - minX);
-      const cropH = Math.max(1, maxY - minY);
-
-      const actions: Parameters<typeof manipulateAsync>[1] = [];
-      if (Math.abs(tiltDeg) > 0.5) {
-        actions.push({ rotate: tiltDeg });
-      }
-      actions.push({
-        crop: { originX: minX, originY: minY, width: cropW, height: cropH },
-      });
-      actions.push({ resize: { width: 1200 } });
-
-      const result = await manipulateAsync(photo.uri, actions, {
-        compress: 0.82,
-        format: SaveFormat.JPEG,
-        base64: true,
-      });
-
+      // Resize image to 1200px wide for upload (reduces payload size)
+      const result = await manipulateAsync(
+        photo.uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.82, format: SaveFormat.JPEG, base64: true },
+      );
       const base64 = result.base64;
       if (!base64) throw new Error("No se pudo comprimir la imagen");
 
-      await addPage(projectId, base64);
+      // Convert screen corner positions to coordinates in the 1200px-wide resized image.
+      // Backend applies a true homography perspective warp using these corners.
+      const resizeScale = 1200 / photo.width;
+      function toResizedImg(pt: Point): { x: number; y: number } {
+        return {
+          x: Math.round(((pt.x - offsetX) / scale) * resizeScale),
+          y: Math.round(((pt.y - offsetY) / scale) * resizeScale),
+        };
+      }
+
+      const imageCorners = {
+        tl: toResizedImg(corners.tl),
+        tr: toResizedImg(corners.tr),
+        bl: toResizedImg(corners.bl),
+        br: toResizedImg(corners.br),
+      };
+
+      await addPage(projectId, base64, imageCorners);
       router.back();
     } catch (err) {
       setUploading(false);

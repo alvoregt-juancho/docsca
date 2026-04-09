@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Project, PageSummary } from "@/types";
-import { API } from "@/services/api";
+import { API, type PageCorners } from "@/services/api";
 
 interface ProjectContextValue {
   projects: Project[];
@@ -9,7 +9,7 @@ interface ProjectContextValue {
   createProject: (name: string) => Project;
   deleteProject: (id: string) => void;
   getProject: (id: string) => Project | undefined;
-  addPage: (projectId: string, imageBase64: string) => Promise<void>;
+  addPage: (projectId: string, imageBase64: string, corners?: PageCorners) => Promise<void>;
   generateDocument: (projectId: string) => Promise<string>;
 }
 
@@ -66,7 +66,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const getProject = (id: string) => projects.find((p) => p.id === id);
 
-  const addPage = async (projectId: string, imageBase64: string): Promise<void> => {
+  const addPage = async (projectId: string, imageBase64: string, corners?: PageCorners): Promise<void> => {
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error("Proyecto no encontrado");
 
@@ -91,7 +91,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     );
 
     try {
-      const result = await API.processPage(imageBase64, projectId, captureOrder);
+      const result = await API.processPage(imageBase64, projectId, captureOrder, corners);
       const finalPage: PageSummary = {
         id: result.pageId,
         captureOrder,
