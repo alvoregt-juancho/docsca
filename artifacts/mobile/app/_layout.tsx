@@ -7,7 +7,8 @@ import {
 } from "@expo-google-fonts/inter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
-import React, { useEffect } from "react";
+import * as SplashScreen from "expo-splash-screen";
+import React, { useEffect, useLayoutEffect } from "react";
 import { NativeModules } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -18,7 +19,20 @@ import { ProjectProvider } from "@/context/ProjectContext";
 
 const keyboardControllerAvailable = !!NativeModules.KeyboardControllerNative;
 
+// Keep the splash visible until we explicitly dismiss it.
+SplashScreen.preventAutoHideAsync();
+
 const queryClient = new QueryClient();
+
+function hideSplash() {
+  // SDK 54: use synchronous hide() which works on new arch.
+  // hideAsync() hangs silently on the new RN architecture.
+  try {
+    SplashScreen.hide();
+  } catch {
+    SplashScreen.hideAsync().catch(() => {});
+  }
+}
 
 function RootLayoutNav() {
   return (
@@ -53,11 +67,18 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
+  // Dismiss as soon as this component mounts — synchronously, before paint.
+  // This fires on the very first render regardless of font status.
+  useLayoutEffect(() => {
+    hideSplash();
+  }, []);
+
+  // Belt-and-suspenders: also dismiss when fonts resolve (or error).
   useEffect(() => {
-    if (fontError) {
-      console.warn("Font loading error:", fontError);
+    if (fontsLoaded || fontError) {
+      hideSplash();
     }
-  }, [fontError]);
+  }, [fontsLoaded, fontError]);
 
   return (
     <SafeAreaProvider>
