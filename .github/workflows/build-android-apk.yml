@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build APK with embedded JS
+    name: Build release APK
     runs-on: ubuntu-latest
 
     env:
@@ -45,26 +45,25 @@ jobs:
         env:
           EXPO_NO_GIT_STATUS: 1
 
-      - name: Bundle JavaScript (expo export:embed)
-        working-directory: artifacts/mobile
+      - name: Remove broken entryFile from build.gradle
+        working-directory: artifacts/mobile/android
         run: |
-          mkdir -p android/app/src/main/assets
-          pnpm exec expo export:embed \
-            --platform android \
-            --dev false \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res/
-          echo "Bundle size: $(wc -c < android/app/src/main/assets/index.android.bundle) bytes"
+          # Gradle resolves entryFile via pnpm virtual store absolute path,
+          # which Metro cannot resolve. Removing this line lets expo export:embed
+          # auto-detect the correct entry (expo-router/entry) the same way it
+          # works when called directly without --entry-file.
+          sed -i '/entryFile = file/d' app/build.gradle
+          echo "Patched build.gradle - entryFile line removed"
+          grep -n "entryFile" app/build.gradle || echo "Confirmed: no entryFile line remains"
 
       - name: Make gradlew executable
         working-directory: artifacts/mobile/android
         run: chmod +x gradlew
 
-      - name: Build release APK (skip re-bundling, use pre-built JS)
+      - name: Build release APK
         working-directory: artifacts/mobile/android
         run: |
           ./gradlew assembleRelease \
-            -x :app:createBundleReleaseJsAndAssets \
             -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m" \
             -Dorg.gradle.daemon=false \
             --stacktrace
