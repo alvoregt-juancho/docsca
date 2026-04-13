@@ -1,0 +1,6 @@
+# Ignore build artifacts and dev files to keep EAS upload small
+android/
+ios/
+.expo/
+node_modules/
+static-build/
