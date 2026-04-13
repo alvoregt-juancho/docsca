@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build APK with embedded JS
+    name: Build release APK
     runs-on: ubuntu-latest
 
     env:
@@ -49,20 +49,19 @@ jobs:
         working-directory: artifacts/mobile/android
         run: chmod +x gradlew
 
-      - name: Build APK (with embedded JS bundle)
+      - name: Build release APK
         working-directory: artifacts/mobile/android
         run: |
-          ./gradlew assembleDebug \
-            -PbundleInDebug=true \
+          ./gradlew assembleRelease \
             -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m" \
             -Dorg.gradle.daemon=false \
             --stacktrace
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
-      - name: Upload APK
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: docscan-debug-apk
-          path: artifacts/mobile/android/app/build/outputs/apk/debug/*.apk
+          name: docscan-release-apk
+          path: artifacts/mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 14
