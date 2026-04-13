@@ -112,11 +112,11 @@ const appName = getAppName();
 // server (port 18115), so we transparently proxy API calls here.
 const API_PORT = parseInt(process.env.API_PORT || "8080", 10);
 
-function proxyToApi(req, res) {
+function proxyToApi(req, res, forwardPath) {
   const options = {
     hostname: "localhost",
     port: API_PORT,
-    path: req.url,
+    path: forwardPath || req.url,
     method: req.method,
     headers: { ...req.headers, host: `localhost:${API_PORT}` },
   };
@@ -139,13 +139,20 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
   let pathname = url.pathname;
 
+  console.log(`[serve] ${req.method} ${req.url} | pathname=${pathname} basePath="${basePath}"`);
+
+  // Strip basePath prefix first (if present)
   if (basePath && pathname.startsWith(basePath)) {
     pathname = pathname.slice(basePath.length) || "/";
   }
 
-  // Proxy all /api/* calls to the API server
+  // Proxy /api/* to the API server (checked after basePath stripping so it
+  // works regardless of whether the router prepends the artifact prefix)
   if (pathname.startsWith("/api")) {
-    return proxyToApi(req, res);
+    const query = url.search || "";
+    const forwardPath = pathname + query;
+    console.log(`[proxy] -> localhost:${API_PORT}${forwardPath}`);
+    return proxyToApi(req, res, forwardPath);
   }
 
   if (pathname === "/" || pathname === "/manifest") {
