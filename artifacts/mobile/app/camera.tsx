@@ -21,6 +21,7 @@ import { useProjectContext } from "@/context/ProjectContext";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
+// Document frame shown as a guide during capture (letter-page aspect ratio)
 const FRAME_W = SCREEN_W * 0.85;
 const FRAME_H = FRAME_W * 1.35;
 const FRAME_X = (SCREEN_W - FRAME_W) / 2;
@@ -28,7 +29,8 @@ const FRAME_Y = (SCREEN_H - FRAME_H) / 2 - 40;
 const CORNER = 28;
 const BORDER = 3;
 
-const HANDLE_SIZE = 32;
+// Handle size — large enough for easy touch on mobile
+const HANDLE_SIZE = 44;
 
 interface Point {
   x: number;
@@ -41,7 +43,15 @@ interface PhotoState {
   height: number;
 }
 
-function calcDisplayRect(photoW: number, photoH: number) {
+interface DisplayRect {
+  dispW: number;
+  dispH: number;
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+}
+
+function calcDisplayRect(photoW: number, photoH: number): DisplayRect {
   const scaleX = SCREEN_W / photoW;
   const scaleY = SCREEN_H / photoH;
   const scale = Math.min(scaleX, scaleY);
@@ -99,7 +109,6 @@ export default function CameraScreen() {
   const [photo, setPhoto] = useState<PhotoState | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Perspective selection state (screen pixel coordinates)
   const [corners, setCorners] = useState({
     tl: { x: 0, y: 0 },
     tr: { x: 0, y: 0 },
@@ -107,19 +116,27 @@ export default function CameraScreen() {
     br: { x: 0, y: 0 },
   });
 
-  const displayRect = photo
-    ? calcDisplayRect(photo.width, photo.height)
-    : null;
-
+  // Keep refs so panResponder closures always access current values
   const cornersRef = useRef(corners);
   cornersRef.current = corners;
 
+  const displayRectRef = useRef<DisplayRect | null>(null);
+
+  // Start positions captured when a drag begins
   const startRef = useRef({
     tl: { x: 0, y: 0 },
     tr: { x: 0, y: 0 },
     bl: { x: 0, y: 0 },
     br: { x: 0, y: 0 },
   });
+
+  // PanResponders read displayRectRef so they always have the current rect
+  const panResponders = useRef({
+    tl: makePR("tl"),
+    tr: makePR("tr"),
+    bl: makePR("bl"),
+    br: makePR("br"),
+  }).current;
 
   function makePR(key: "tl" | "tr" | "bl" | "br") {
     return PanResponder.create({
@@ -129,31 +146,20 @@ export default function CameraScreen() {
         startRef.current[key] = { ...cornersRef.current[key] };
       },
       onPanResponderMove: (_, gs) => {
-        if (!displayRect) return;
-        const sx = startRef.current[key].x + gs.dx;
-        const sy = startRef.current[key].y + gs.dy;
-        const clampedX = Math.max(
-          displayRect.offsetX,
-          Math.min(displayRect.offsetX + displayRect.dispW, sx),
-        );
-        const clampedY = Math.max(
-          displayRect.offsetY,
-          Math.min(displayRect.offsetY + displayRect.dispH, sy),
-        );
+        const rect = displayRectRef.current;
+        if (!rect) return;
+        const newX = startRef.current[key].x + gs.dx;
+        const newY = startRef.current[key].y + gs.dy;
         setCorners((prev) => ({
           ...prev,
-          [key]: { x: clampedX, y: clampedY },
+          [key]: {
+            x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, newX)),
+            y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, newY)),
+          },
         }));
       },
     });
   }
-
-  const panResponders = useRef({
-    tl: makePR("tl"),
-    tr: makePR("tr"),
-    bl: makePR("bl"),
-    br: makePR("br"),
-  }).current;
 
   if (!permission) {
     return (
@@ -195,13 +201,30 @@ export default function CameraScreen() {
       if (!result) return;
       const { uri, width, height } = result;
       const rect = calcDisplayRect(width, height);
-      const margin = 0.06;
+
+      // Store the current display rect so panResponders can use it immediately
+      displayRectRef.current = rect;
+
+      // Initialize corners to match the document frame the user saw during capture.
+      // The frame is in screen coordinates; clamp to the actual displayed photo area.
       setPhoto({ uri, width, height });
       setCorners({
-        tl: { x: rect.offsetX + rect.dispW * margin, y: rect.offsetY + rect.dispH * margin },
-        tr: { x: rect.offsetX + rect.dispW * (1 - margin), y: rect.offsetY + rect.dispH * margin },
-        bl: { x: rect.offsetX + rect.dispW * margin, y: rect.offsetY + rect.dispH * (1 - margin) },
-        br: { x: rect.offsetX + rect.dispW * (1 - margin), y: rect.offsetY + rect.dispH * (1 - margin) },
+        tl: {
+          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X)),
+          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y)),
+        },
+        tr: {
+          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X + FRAME_W)),
+          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y)),
+        },
+        bl: {
+          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X)),
+          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y + FRAME_H)),
+        },
+        br: {
+          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X + FRAME_W)),
+          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y + FRAME_H)),
+        },
       });
     } catch {
       Alert.alert("Error", "No se pudo tomar la foto");
@@ -209,12 +232,11 @@ export default function CameraScreen() {
   };
 
   const handleConfirm = async () => {
-    if (!photo || !projectId || !displayRect) return;
+    if (!photo || !projectId || !displayRectRef.current) return;
+    const { offsetX, offsetY, scale } = displayRectRef.current;
     setUploading(true);
     try {
-      const { offsetX, offsetY, scale } = displayRect;
-
-      // Resize image to 1200px wide for upload (reduces payload size)
+      // Resize image to 1200px wide for upload
       const result = await manipulateAsync(
         photo.uri,
         [{ resize: { width: 1200 } }],
@@ -223,37 +245,38 @@ export default function CameraScreen() {
       const base64 = result.base64;
       if (!base64) throw new Error("No se pudo comprimir la imagen");
 
-      // Convert screen corner positions to coordinates in the 1200px-wide resized image.
-      // Backend applies a true homography perspective warp using these corners.
+      // Map screen corner positions → coordinates in the 1200px-wide resized image
       const resizeScale = 1200 / photo.width;
-      function toResizedImg(pt: Point): { x: number; y: number } {
+      function toResizedImg(pt: Point) {
         return {
           x: Math.round(((pt.x - offsetX) / scale) * resizeScale),
           y: Math.round(((pt.y - offsetY) / scale) * resizeScale),
         };
       }
 
-      const imageCorners = {
+      await addPage(projectId, base64, {
         tl: toResizedImg(corners.tl),
         tr: toResizedImg(corners.tr),
         bl: toResizedImg(corners.bl),
         br: toResizedImg(corners.br),
-      };
-
-      await addPage(projectId, base64, imageCorners);
+      });
       router.back();
     } catch (err) {
       setUploading(false);
+      const msg = (err as Error).message;
       Alert.alert(
-        "Error",
-        (err as Error).message || "No se pudo procesar la página",
+        "Error al procesar",
+        msg && msg !== "undefined" ? msg : "No se pudo conectar con el servidor. Verifica tu conexión.",
       );
     }
   };
 
-  const handleRetake = () => setPhoto(null);
+  const handleRetake = () => {
+    setPhoto(null);
+    displayRectRef.current = null;
+  };
 
-  if (photo && displayRect) {
+  if (photo && displayRectRef.current) {
     return (
       <View style={styles.preview}>
         <Image
@@ -262,17 +285,17 @@ export default function CameraScreen() {
           resizeMode="contain"
         />
 
-        {/* Perspective selection overlay */}
+        {/* Quadrilateral selection overlay — connects the 4 corner handles */}
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          {/* Dimmed overlay outside selection */}
+          {/* Selection rectangle border */}
           <View
             style={[
               styles.selectionOverlay,
               {
-                left: corners.tl.x,
-                top: corners.tl.y,
-                right: SCREEN_W - corners.br.x,
-                bottom: SCREEN_H - corners.br.y,
+                left: Math.min(corners.tl.x, corners.bl.x),
+                top: Math.min(corners.tl.y, corners.tr.y),
+                width: Math.max(corners.tr.x, corners.br.x) - Math.min(corners.tl.x, corners.bl.x),
+                height: Math.max(corners.bl.y, corners.br.y) - Math.min(corners.tl.y, corners.tr.y),
               },
             ]}
             pointerEvents="none"
@@ -347,7 +370,7 @@ export default function CameraScreen() {
           >
             <Feather name="x" size={26} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.cameraHint}>Centra el documento</Text>
+          <Text style={styles.cameraHint}>Centra el documento en el marco</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={{ flex: 1 }} />
@@ -511,7 +534,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     borderWidth: 2,
     borderColor: Colors.primary,
-    backgroundColor: "transparent",
+    backgroundColor: "rgba(37,99,235,0.08)",
   },
   handle: {
     position: "absolute",
@@ -523,9 +546,9 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 6,
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
   },
   uploadingBox: {
     alignItems: "center",
