@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build release APK
     runs-on: ubuntu-latest
 
     env:
@@ -45,11 +45,23 @@ jobs:
         env:
           EXPO_NO_GIT_STATUS: 1
 
+      - name: Bundle JavaScript into APK assets
+        working-directory: artifacts/mobile
+        run: |
+          mkdir -p android/app/src/main/assets
+          pnpm exec react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file node_modules/expo-router/entry.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res/ \
+            --reset-cache
+
       - name: Make gradlew executable
         working-directory: artifacts/mobile/android
         run: chmod +x gradlew
 
-      - name: Build debug APK
+      - name: Build debug APK (with embedded JS)
         working-directory: artifacts/mobile/android
         run: |
           ./gradlew assembleDebug \
@@ -59,7 +71,7 @@ jobs:
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
-      - name: Upload debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: docscan-debug-apk
