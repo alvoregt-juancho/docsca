@@ -93,5 +93,5 @@ export async function enhanceForScan(imageBuffer: Buffer): Promise<Buffer> {
     }
   }
 
-  return img.quality(92).getBufferAsync(Jimp.MIME_JPEG);
+  return img.quality(98).getBufferAsync(Jimp.MIME_JPEG);
 }
