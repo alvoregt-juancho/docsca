@@ -101,7 +101,7 @@ async function downloadFile(
 export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { getProject, generateDocument } = useProjectContext();
+  const { getProject, generateDocument, clearFailedPages } = useProjectContext();
 
   const [generating, setGenerating] = useState(false);
   const [downloading, setDownloading] = useState<"word" | "pdf" | "scan" | null>(null);
@@ -126,6 +126,7 @@ export default function ProjectDetailScreen() {
 
   const readyPages = project.pages.filter((p) => !p.isProcessing && !p.error);
   const processingPages = project.pages.filter((p) => p.isProcessing);
+  const failedPages = project.pages.filter((p) => p.error);
   const canGenerate = readyPages.length > 0 && processingPages.length === 0;
 
   const handleGenerate = async () => {
@@ -231,6 +232,30 @@ export default function ProjectDetailScreen() {
                 <PageRow key={page.id} page={page} />
               ))}
             </View>
+            {failedPages.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearErrorsBtn}
+                onPress={() =>
+                  Alert.alert(
+                    "Limpiar errores",
+                    `¿Eliminar ${failedPages.length} página${failedPages.length > 1 ? "s" : ""} con error? Necesitarás volver a fotografiarlas.`,
+                    [
+                      { text: "Cancelar", style: "cancel" },
+                      {
+                        text: "Eliminar",
+                        style: "destructive",
+                        onPress: () => clearFailedPages(project.id),
+                      },
+                    ],
+                  )
+                }
+              >
+                <Feather name="trash-2" size={16} color={Colors.error} />
+                <Text style={styles.clearErrorsBtnText}>
+                  Limpiar {failedPages.length} página{failedPages.length > 1 ? "s" : ""} con error
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -592,5 +617,18 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
     textDecorationLine: "underline",
+  },
+  clearErrorsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  clearErrorsBtnText: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+    color: Colors.error,
   },
 });

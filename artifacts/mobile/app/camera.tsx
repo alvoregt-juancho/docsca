@@ -117,9 +117,9 @@ export default function CameraScreen() {
             height: framePhotoH,
           },
         },
-        { resize: { width: 1800 } },
+        { resize: { width: 1500 } },
       ],
-      { compress: 0.92, format: SaveFormat.JPEG, base64: true },
+      { compress: 0.88, format: SaveFormat.JPEG, base64: true },
     );
 
     if (!result.base64) throw new Error("No se pudo recortar la imagen");

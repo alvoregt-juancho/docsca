@@ -10,6 +10,7 @@ interface ProjectContextValue {
   deleteProject: (id: string) => void;
   getProject: (id: string) => Project | undefined;
   addPage: (projectId: string, imageBase64: string) => Promise<void>;
+  clearFailedPages: (projectId: string) => void;
   generateDocument: (projectId: string) => Promise<string>;
 }
 
@@ -136,6 +137,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const clearFailedPages = (projectId: string) => {
+    setAndPersist((prev) =>
+      prev.map((p) => {
+        if (p.id !== projectId) return p;
+        return {
+          ...p,
+          pages: p.pages.filter((pg) => !pg.error),
+        };
+      }),
+    );
+  };
+
   const generateDocument = async (projectId: string): Promise<string> => {
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error("Proyecto no encontrado");
@@ -159,6 +172,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         deleteProject,
         getProject,
         addPage,
+        clearFailedPages,
         generateDocument,
       }}
     >
