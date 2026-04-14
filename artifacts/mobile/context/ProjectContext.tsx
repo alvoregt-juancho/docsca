@@ -21,13 +21,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loaded, setLoaded] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureCounterRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => {
         if (raw) {
           try {
-            setProjects(JSON.parse(raw));
+            const parsed = JSON.parse(raw) as Project[];
+            setProjects(parsed);
+            for (const p of parsed) {
+              captureCounterRef.current[p.id] = p.pages.length;
+            }
           } catch {}
         }
       })
@@ -56,21 +61,23 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       createdAt: Date.now(),
       pages: [],
     };
+    captureCounterRef.current[project.id] = 0;
     setAndPersist((prev) => [project, ...prev]);
     return project;
   };
 
   const deleteProject = (id: string) => {
+    delete captureCounterRef.current[id];
     setAndPersist((prev) => prev.filter((p) => p.id !== id));
   };
 
   const getProject = (id: string) => projects.find((p) => p.id === id);
 
   const addPage = async (projectId: string, imageBase64: string): Promise<void> => {
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) throw new Error("Proyecto no encontrado");
+    const counter = captureCounterRef.current[projectId] ?? 0;
+    const captureOrder = counter;
+    captureCounterRef.current[projectId] = counter + 1;
 
-    const captureOrder = project.pages.length;
     const tempId = `${projectId}-${captureOrder}-tmp`;
 
     const tempPage: PageSummary = {
