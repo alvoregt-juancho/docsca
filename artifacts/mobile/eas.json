@@ -20,7 +20,7 @@
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "b3c6dadb-c834-4261-8f7a-c211f162114f-00-khhgwmk6ldxz.replit.app",
+        "EXPO_PUBLIC_DOMAIN": "b3c6dadb-c834-4261-8f7a-c211f162114f-00-khhgwmk6ldxz.kirk.replit.dev",
         "EXPO_PUBLIC_REPL_ID": "b3c6dadb-c834-4261-8f7a-c211f162114f"
       }
     },
