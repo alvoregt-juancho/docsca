@@ -57,6 +57,7 @@ export default function CameraScreen() {
   const [capturing, setCapturing] = useState(false);
   const [queue, setQueue] = useState<QueuedPhoto[]>([]);
   const [uploadedCount, setUploadedCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
   const [uploading, setUploading] = useState(false);
   const processingRef = useRef(false);
   const queueRef = useRef<QueuedPhoto[]>([]);
@@ -75,10 +76,12 @@ export default function CameraScreen() {
 
       try {
         await addPage(projectId, item.base64);
-      } catch {}
+        setUploadedCount((c) => c + 1);
+      } catch {
+        setFailedCount((c) => c + 1);
+      }
 
       setQueue((prev) => prev.filter((p) => p.id !== item.id));
-      setUploadedCount((c) => c + 1);
     }
 
     processingRef.current = false;
@@ -199,13 +202,13 @@ export default function CameraScreen() {
           Subiendo {queue.length} foto{queue.length !== 1 ? "s" : ""} restante{queue.length !== 1 ? "s" : ""}...
         </Text>
         <Text style={styles.uploadingSubtext}>
-          {uploadedCount} procesada{uploadedCount !== 1 ? "s" : ""}
+          {uploadedCount} procesada{uploadedCount !== 1 ? "s" : ""}{failedCount > 0 ? `, ${failedCount} fallida${failedCount !== 1 ? "s" : ""}` : ""}
         </Text>
       </View>
     );
   }
 
-  const totalCaptured = queue.length + uploadedCount;
+  const totalCaptured = queue.length + uploadedCount + failedCount;
 
   return (
     <View style={styles.camera}>
