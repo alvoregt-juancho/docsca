@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { processPageWithGemini, isGeminiConfigured } from "../lib/geminiOcr.js";
 import { storePage } from "../lib/tempStorage.js";
+import { enhanceForScan } from "../lib/scanEnhance.js";
 
 const router = Router();
 
@@ -46,6 +47,9 @@ router.post("/", async (req, res) => {
 
     const ocrResult = await processPageWithGemini(imageBase64, resolvedMime);
 
+    const enhancedBuffer = await enhanceForScan(Buffer.from(imageBase64, "base64"));
+    const enhancedBase64 = enhancedBuffer.toString("base64");
+
     const pageId = `${safeProjectId}-${safeOrder}`;
     const page = {
       pageId,
@@ -62,7 +66,7 @@ router.post("/", async (req, res) => {
       originalImagePath: "",
     };
 
-    await storePage(page, imageBase64);
+    await storePage(page, enhancedBase64);
 
     res.json({
       success: true,

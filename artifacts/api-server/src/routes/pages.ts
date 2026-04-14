@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { processPageWithGemini, isGeminiConfigured } from "../lib/geminiOcr.js";
 import { storePage } from "../lib/tempStorage.js";
+import { enhanceForScan } from "../lib/scanEnhance.js";
 
 const router = Router();
 
@@ -54,7 +55,10 @@ router.post("/process", async (req, res) => {
       originalImagePath: "",
     };
 
-    await storePage(page, imageBase64);
+    const enhancedBuffer = await enhanceForScan(Buffer.from(imageBase64, "base64"));
+    const enhancedBase64 = enhancedBuffer.toString("base64");
+
+    await storePage(page, enhancedBase64);
 
     res.json({
       success: true,

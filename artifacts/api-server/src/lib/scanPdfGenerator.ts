@@ -3,16 +3,10 @@ import { existsSync } from "fs";
 import type { StoredPage } from "./tempStorage.js";
 import { sortPagesWithInterpolation } from "./tempStorage.js";
 
-// US Letter: 8.5 × 11 inches at 72 dpi = 612 × 792 points
 const LETTER_W = 612;
 const LETTER_H = 792;
-const FOOTER_H = 30;
+const FOOTER_H = 24;
 
-/**
- * Generates a scan-only PDF: each page is the perspective-corrected JPEG
- * fitted to US Letter (8.5 × 11 in) with a centered page-number footer.
- * Pages are sorted using the same interpolation logic as the OCR exports.
- */
 export async function generateScanPdf(
   pages: StoredPage[],
   outputPath: string,
@@ -41,7 +35,13 @@ export async function generateScanPdf(
             valign: "center",
           });
         } catch {
-          // blank page if image is unreadable
+          doc
+            .fontSize(12)
+            .fillColor("#999999")
+            .text("Image not available", 0, LETTER_H / 2, {
+              width: LETTER_W,
+              align: "center",
+            });
         }
       }
 
@@ -50,7 +50,7 @@ export async function generateScanPdf(
           .font("Helvetica")
           .fontSize(9)
           .fillColor("#888888")
-          .text(footerPageNumber, 0, LETTER_H - FOOTER_H + 8, {
+          .text(footerPageNumber, 0, LETTER_H - FOOTER_H + 6, {
             width: LETTER_W,
             align: "center",
           });

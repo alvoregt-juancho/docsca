@@ -114,9 +114,9 @@ export default function CameraScreen() {
             height: framePhotoH,
           },
         },
-        { resize: { width: 1200 } },
+        { resize: { width: 1800 } },
       ],
-      { compress: 0.85, format: SaveFormat.JPEG, base64: true },
+      { compress: 0.92, format: SaveFormat.JPEG, base64: true },
     );
 
     if (!result.base64) throw new Error("No se pudo recortar la imagen");
@@ -128,7 +128,7 @@ export default function CameraScreen() {
     setCapturing(true);
     try {
       const result = await cameraRef.current.takePictureAsync({
-        quality: 0.9,
+        quality: 1,
         exif: true,
       });
       if (!result) {
