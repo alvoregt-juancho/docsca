@@ -10,7 +10,7 @@ import {
   pdfPath,
   scanPdfPath,
 } from "../lib/tempStorage.js";
-import { isConfigured } from "../lib/documentAiClient.js";
+import { isGeminiConfigured } from "../lib/geminiOcr.js";
 import { writeFile } from "fs/promises";
 
 const router = Router();
@@ -25,14 +25,12 @@ function validateId(id: string | undefined, label: string): string {
 }
 
 router.get("/config", (_req, res) => {
+  const configured = isGeminiConfigured();
   res.json({
-    configured: isConfigured(),
-    projectId: process.env["GOOGLE_CLOUD_PROJECT_ID"] || null,
-    processorId: process.env["GOOGLE_DOCUMENT_AI_PROCESSOR_ID"] || null,
-    location: process.env["GOOGLE_CLOUD_LOCATION"] || "us",
-    note: isConfigured()
-      ? "Google Document AI is configured"
-      : "Using mock OCR data. Set GOOGLE_CLOUD_PROJECT_ID, GOOGLE_DOCUMENT_AI_PROCESSOR_ID, GOOGLE_APPLICATION_CREDENTIALS_JSON env vars to enable real OCR.",
+    configured,
+    note: configured
+      ? "Gemini AI OCR is active"
+      : "Gemini AI is not configured. OCR will not work.",
   });
 });
 

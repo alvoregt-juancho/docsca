@@ -2,13 +2,11 @@ import { Feather } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
-  PanResponder,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -21,7 +19,6 @@ import { useProjectContext } from "@/context/ProjectContext";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-// Document frame shown as a guide during capture (letter-page aspect ratio)
 const FRAME_W = SCREEN_W * 0.85;
 const FRAME_H = FRAME_W * 1.35;
 const FRAME_X = (SCREEN_W - FRAME_W) / 2;
@@ -29,37 +26,9 @@ const FRAME_Y = (SCREEN_H - FRAME_H) / 2 - 40;
 const CORNER = 28;
 const BORDER = 3;
 
-// Handle size — large enough for easy touch on mobile
-const HANDLE_SIZE = 44;
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface PhotoState {
-  uri: string;
-  width: number;
-  height: number;
-}
-
-interface DisplayRect {
-  dispW: number;
-  dispH: number;
-  offsetX: number;
-  offsetY: number;
-  scale: number;
-}
-
-function calcDisplayRect(photoW: number, photoH: number): DisplayRect {
-  const scaleX = SCREEN_W / photoW;
-  const scaleY = SCREEN_H / photoH;
-  const scale = Math.min(scaleX, scaleY);
-  const dispW = photoW * scale;
-  const dispH = photoH * scale;
-  const offsetX = (SCREEN_W - dispW) / 2;
-  const offsetY = (SCREEN_H - dispH) / 2;
-  return { dispW, dispH, offsetX, offsetY, scale };
+interface QueuedPhoto {
+  id: string;
+  base64: string;
 }
 
 function DocumentFrame() {
@@ -78,27 +47,6 @@ function DocumentFrame() {
   );
 }
 
-function CornerHandle({
-  pos,
-  panResponder,
-}: {
-  pos: Point;
-  panResponder: ReturnType<typeof PanResponder.create>;
-}) {
-  return (
-    <View
-      {...panResponder.panHandlers}
-      style={[
-        styles.handle,
-        {
-          left: pos.x - HANDLE_SIZE / 2,
-          top: pos.y - HANDLE_SIZE / 2,
-        },
-      ]}
-    />
-  );
-}
-
 export default function CameraScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>();
   const router = useRouter();
@@ -106,60 +54,112 @@ export default function CameraScreen() {
 
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
-  const [photo, setPhoto] = useState<PhotoState | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [queue, setQueue] = useState<QueuedPhoto[]>([]);
+  const [uploadedCount, setUploadedCount] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const processingRef = useRef(false);
+  const queueRef = useRef<QueuedPhoto[]>([]);
 
-  const [corners, setCorners] = useState({
-    tl: { x: 0, y: 0 },
-    tr: { x: 0, y: 0 },
-    bl: { x: 0, y: 0 },
-    br: { x: 0, y: 0 },
-  });
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
-  // Keep refs so panResponder closures always access current values
-  const cornersRef = useRef(corners);
-  cornersRef.current = corners;
+  const processQueue = useCallback(async () => {
+    if (processingRef.current || !projectId) return;
+    processingRef.current = true;
 
-  const displayRectRef = useRef<DisplayRect | null>(null);
+    while (queueRef.current.length > 0) {
+      const item = queueRef.current[0];
+      if (!item) break;
 
-  // Start positions captured when a drag begins
-  const startRef = useRef({
-    tl: { x: 0, y: 0 },
-    tr: { x: 0, y: 0 },
-    bl: { x: 0, y: 0 },
-    br: { x: 0, y: 0 },
-  });
+      try {
+        await addPage(projectId, item.base64);
+      } catch {}
 
-  // PanResponders read displayRectRef so they always have the current rect
-  const panResponders = useRef({
-    tl: makePR("tl"),
-    tr: makePR("tr"),
-    bl: makePR("bl"),
-    br: makePR("br"),
-  }).current;
+      setQueue((prev) => prev.filter((p) => p.id !== item.id));
+      setUploadedCount((c) => c + 1);
+    }
 
-  function makePR(key: "tl" | "tr" | "bl" | "br") {
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        startRef.current[key] = { ...cornersRef.current[key] };
-      },
-      onPanResponderMove: (_, gs) => {
-        const rect = displayRectRef.current;
-        if (!rect) return;
-        const newX = startRef.current[key].x + gs.dx;
-        const newY = startRef.current[key].y + gs.dy;
-        setCorners((prev) => ({
-          ...prev,
-          [key]: {
-            x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, newX)),
-            y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, newY)),
+    processingRef.current = false;
+  }, [projectId, addPage]);
+
+  useEffect(() => {
+    if (queue.length > 0 && !processingRef.current) {
+      processQueue();
+    }
+  }, [queue.length, processQueue]);
+
+  const cropToFrame = async (uri: string, photoW: number, photoH: number): Promise<string> => {
+    const scaleToFill = Math.max(SCREEN_W / photoW, SCREEN_H / photoH);
+
+    const visibleW = SCREEN_W / scaleToFill;
+    const visibleH = SCREEN_H / scaleToFill;
+    const cropOffsetX = (photoW - visibleW) / 2;
+    const cropOffsetY = (photoH - visibleH) / 2;
+
+    const framePhotoX = Math.max(0, Math.round(cropOffsetX + FRAME_X / scaleToFill));
+    const framePhotoY = Math.max(0, Math.round(cropOffsetY + FRAME_Y / scaleToFill));
+    const framePhotoW = Math.min(Math.round(FRAME_W / scaleToFill), photoW - framePhotoX);
+    const framePhotoH = Math.min(Math.round(FRAME_H / scaleToFill), photoH - framePhotoY);
+
+    const result = await manipulateAsync(
+      uri,
+      [
+        {
+          crop: {
+            originX: framePhotoX,
+            originY: framePhotoY,
+            width: framePhotoW,
+            height: framePhotoH,
           },
-        }));
-      },
-    });
-  }
+        },
+        { resize: { width: 1200 } },
+      ],
+      { compress: 0.85, format: SaveFormat.JPEG, base64: true },
+    );
+
+    if (!result.base64) throw new Error("No se pudo recortar la imagen");
+    return result.base64;
+  };
+
+  const handleCapture = async () => {
+    if (!cameraRef.current || capturing) return;
+    setCapturing(true);
+    try {
+      const result = await cameraRef.current.takePictureAsync({
+        quality: 0.9,
+        exif: true,
+      });
+      if (!result) {
+        setCapturing(false);
+        return;
+      }
+
+      const base64 = await cropToFrame(result.uri, result.width, result.height);
+
+      const id = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setQueue((prev) => [...prev, { id, base64 }]);
+    } catch {
+      Alert.alert("Error", "No se pudo tomar la foto. Intenta de nuevo.");
+    }
+    setCapturing(false);
+  };
+
+  const handleDone = () => {
+    if (queue.length > 0 && processingRef.current) {
+      setUploading(true);
+      const interval = setInterval(() => {
+        if (queueRef.current.length === 0) {
+          clearInterval(interval);
+          setUploading(false);
+          router.back();
+        }
+      }, 500);
+    } else {
+      router.back();
+    }
+  };
 
   if (!permission) {
     return (
@@ -191,162 +191,21 @@ export default function CameraScreen() {
     );
   }
 
-  const handleCapture = async () => {
-    if (!cameraRef.current) return;
-    try {
-      const result = await cameraRef.current.takePictureAsync({
-        quality: 0.9,
-        exif: false,
-      });
-      if (!result) return;
-      const { uri, width, height } = result;
-      const rect = calcDisplayRect(width, height);
-
-      // Store the current display rect so panResponders can use it immediately
-      displayRectRef.current = rect;
-
-      // Initialize corners to match the document frame the user saw during capture.
-      // The frame is in screen coordinates; clamp to the actual displayed photo area.
-      setPhoto({ uri, width, height });
-      setCorners({
-        tl: {
-          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X)),
-          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y)),
-        },
-        tr: {
-          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X + FRAME_W)),
-          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y)),
-        },
-        bl: {
-          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X)),
-          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y + FRAME_H)),
-        },
-        br: {
-          x: Math.max(rect.offsetX, Math.min(rect.offsetX + rect.dispW, FRAME_X + FRAME_W)),
-          y: Math.max(rect.offsetY, Math.min(rect.offsetY + rect.dispH, FRAME_Y + FRAME_H)),
-        },
-      });
-    } catch {
-      Alert.alert("Error", "No se pudo tomar la foto");
-    }
-  };
-
-  const handleConfirm = async () => {
-    if (!photo || !projectId || !displayRectRef.current) return;
-    const { offsetX, offsetY, scale } = displayRectRef.current;
-    setUploading(true);
-    try {
-      // Resize image to 1200px wide for upload
-      const result = await manipulateAsync(
-        photo.uri,
-        [{ resize: { width: 1200 } }],
-        { compress: 0.82, format: SaveFormat.JPEG, base64: true },
-      );
-      const base64 = result.base64;
-      if (!base64) throw new Error("No se pudo comprimir la imagen");
-
-      // Map screen corner positions → coordinates in the 1200px-wide resized image
-      const resizeScale = 1200 / photo.width;
-      function toResizedImg(pt: Point) {
-        return {
-          x: Math.round(((pt.x - offsetX) / scale) * resizeScale),
-          y: Math.round(((pt.y - offsetY) / scale) * resizeScale),
-        };
-      }
-
-      await addPage(projectId, base64, {
-        tl: toResizedImg(corners.tl),
-        tr: toResizedImg(corners.tr),
-        bl: toResizedImg(corners.bl),
-        br: toResizedImg(corners.br),
-      });
-      router.back();
-    } catch (err) {
-      setUploading(false);
-      const msg = (err as Error).message;
-      Alert.alert(
-        "Error al procesar",
-        msg && msg !== "undefined" ? msg : "No se pudo conectar con el servidor. Verifica tu conexión.",
-      );
-    }
-  };
-
-  const handleRetake = () => {
-    setPhoto(null);
-    displayRectRef.current = null;
-  };
-
-  if (photo && displayRectRef.current) {
+  if (uploading) {
     return (
-      <View style={styles.preview}>
-        <Image
-          source={{ uri: photo.uri }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="contain"
-        />
-
-        {/* Quadrilateral selection overlay — connects the 4 corner handles */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          {/* Selection rectangle border */}
-          <View
-            style={[
-              styles.selectionOverlay,
-              {
-                left: Math.min(corners.tl.x, corners.bl.x),
-                top: Math.min(corners.tl.y, corners.tr.y),
-                width: Math.max(corners.tr.x, corners.br.x) - Math.min(corners.tl.x, corners.bl.x),
-                height: Math.max(corners.bl.y, corners.br.y) - Math.min(corners.tl.y, corners.tr.y),
-              },
-            ]}
-            pointerEvents="none"
-          />
-
-          {(["tl", "tr", "bl", "br"] as const).map((key) => (
-            <CornerHandle
-              key={key}
-              pos={corners[key]}
-              panResponder={panResponders[key]}
-            />
-          ))}
-        </View>
-
-        <SafeAreaView style={styles.previewOverlay} edges={["top", "bottom"]}>
-          <View style={styles.previewHeader}>
-            <Text style={styles.previewTitle}>Ajusta el documento</Text>
-            <Text style={styles.previewHint}>
-              Arrastra las esquinas azules para alinear el documento
-            </Text>
-          </View>
-          <View style={{ flex: 1 }} />
-          {uploading ? (
-            <View style={styles.uploadingBox}>
-              <ActivityIndicator size="large" color={Colors.primaryForeground} />
-              <Text style={styles.uploadingText}>Subiendo y procesando...</Text>
-            </View>
-          ) : (
-            <View style={styles.previewActions}>
-              <TouchableOpacity
-                style={styles.retakeBtn}
-                onPress={handleRetake}
-                activeOpacity={0.8}
-              >
-                <Feather name="rotate-ccw" size={20} color="#FFFFFF" />
-                <Text style={styles.retakeBtnText}>Repetir</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.confirmBtn}
-                onPress={handleConfirm}
-                activeOpacity={0.8}
-              >
-                <Feather name="check" size={22} color="#FFFFFF" />
-                <Text style={styles.confirmBtnText}>Confirmar</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </SafeAreaView>
+      <View style={[styles.centered, { backgroundColor: "#111" }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.uploadingText}>
+          Subiendo {queue.length} foto{queue.length !== 1 ? "s" : ""} restante{queue.length !== 1 ? "s" : ""}...
+        </Text>
+        <Text style={styles.uploadingSubtext}>
+          {uploadedCount} procesada{uploadedCount !== 1 ? "s" : ""}
+        </Text>
       </View>
     );
   }
+
+  const totalCaptured = queue.length + uploadedCount;
 
   return (
     <View style={styles.camera}>
@@ -361,27 +220,65 @@ export default function CameraScreen() {
         <View style={[styles.darkArea, { flex: 1 }]} />
       </View>
       <DocumentFrame />
+
       <SafeAreaView style={styles.cameraUI} edges={["top", "bottom"]}>
         <View style={styles.cameraHeader}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={handleDone}
             style={styles.closeBtn}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Feather name="x" size={26} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.cameraHint}>Centra el documento en el marco</Text>
+          <Text style={styles.cameraHint}>Centra la página en el marco</Text>
           <View style={{ width: 40 }} />
         </View>
+
         <View style={{ flex: 1 }} />
+
+        {totalCaptured > 0 && (
+          <View style={styles.counterRow}>
+            <View style={styles.counterBadge}>
+              <Feather name="check-circle" size={16} color="#22C55E" />
+              <Text style={styles.counterText}>
+                {totalCaptured} foto{totalCaptured !== 1 ? "s" : ""} capturada{totalCaptured !== 1 ? "s" : ""}
+              </Text>
+            </View>
+            {queue.length > 0 && (
+              <View style={styles.processingBadge}>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+                <Text style={styles.processingText}>
+                  Procesando... ({uploadedCount}/{totalCaptured})
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
         <View style={styles.captureRow}>
+          {totalCaptured > 0 && (
+            <TouchableOpacity
+              style={styles.doneBtn}
+              onPress={handleDone}
+              activeOpacity={0.8}
+            >
+              <Feather name="check" size={20} color="#FFFFFF" />
+              <Text style={styles.doneBtnText}>Listo</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={styles.captureBtn}
+            style={[styles.captureBtn, capturing && styles.captureBtnDisabled]}
             onPress={handleCapture}
             activeOpacity={0.8}
+            disabled={capturing}
           >
-            <View style={styles.captureBtnInner} />
+            {capturing ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <View style={styles.captureBtnInner} />
+            )}
           </TouchableOpacity>
+          <View style={{ width: totalCaptured > 0 ? 80 : 0 }} />
         </View>
       </SafeAreaView>
     </View>
@@ -488,7 +385,50 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  captureRow: { alignItems: "center", paddingBottom: 30 },
+  counterRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  counterBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  counterText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
+  },
+  processingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(37,99,235,0.8)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  processingText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#FFFFFF",
+  },
+  captureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingBottom: 30,
+    gap: 20,
+  },
   captureBtn: {
     width: 76,
     height: 76,
@@ -499,108 +439,39 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.2)",
   },
+  captureBtnDisabled: {
+    opacity: 0.6,
+  },
   captureBtnInner: {
     width: 58,
     height: 58,
     borderRadius: 29,
     backgroundColor: "#FFFFFF",
   },
-  preview: { flex: 1, backgroundColor: "#000" },
-  previewOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "transparent",
-    pointerEvents: "box-none",
-  },
-  previewHeader: {
+  doneBtn: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingTop: 20,
-    paddingBottom: 14,
+    backgroundColor: "#22C55E",
     paddingHorizontal: 20,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    gap: 4,
+    paddingVertical: 14,
+    borderRadius: 24,
+    gap: 6,
   },
-  previewTitle: {
-    fontSize: 17,
+  doneBtnText: {
+    fontSize: 15,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
-  },
-  previewHint: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.7)",
-    textAlign: "center",
-  },
-  selectionOverlay: {
-    position: "absolute",
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    backgroundColor: "rgba(37,99,235,0.08)",
-  },
-  handle: {
-    position: "absolute",
-    width: HANDLE_SIZE,
-    height: HANDLE_SIZE,
-    borderRadius: HANDLE_SIZE / 2,
-    backgroundColor: Colors.primary,
-    borderWidth: 3,
-    borderColor: "#FFFFFF",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  uploadingBox: {
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.75)",
-    marginHorizontal: 40,
-    borderRadius: 16,
-    padding: 24,
-    gap: 14,
-    marginBottom: 40,
   },
   uploadingText: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
     textAlign: "center",
   },
-  previewActions: {
-    flexDirection: "row",
-    paddingHorizontal: 24,
-    paddingBottom: 30,
-    gap: 14,
-  },
-  retakeBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.2)",
-    borderRadius: 14,
-    paddingVertical: 16,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.4)",
-  },
-  retakeBtnText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
-  },
-  confirmBtn: {
-    flex: 1.5,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    gap: 8,
-  },
-  confirmBtnText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
+  uploadingSubtext: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: "#999",
+    textAlign: "center",
   },
 });

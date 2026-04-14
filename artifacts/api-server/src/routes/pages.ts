@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { processPageWithOcr, isConfigured } from "../lib/documentAiClient.js";
+import { processPageWithGemini, isGeminiConfigured } from "../lib/geminiOcr.js";
 import { storePage } from "../lib/tempStorage.js";
 
 const router = Router();
@@ -36,7 +36,7 @@ router.post("/process", async (req, res) => {
     const safeProjectId = validateProjectId(projectId);
     const safeOrder = Math.max(0, Math.floor(Number(captureOrder)));
 
-    const ocrResult = await processPageWithOcr(imageBase64, resolvedMime);
+    const ocrResult = await processPageWithGemini(imageBase64, resolvedMime);
 
     const pageId = `${safeProjectId}-${safeOrder}`;
     const page = {
@@ -63,7 +63,7 @@ router.post("/process", async (req, res) => {
       wordCount: ocrResult.wordCount,
       hasImages: ocrResult.hasImages,
       hasTables: ocrResult.hasTables,
-      isMockData: !isConfigured(),
+      isMockData: false,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to process page");
