@@ -84,6 +84,28 @@ export async function storePage(page: StoredPage, imageBase64: string): Promise<
   );
 }
 
+function normalizeText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function areSimilarPages(textA: string, textB: string): boolean {
+  const a = normalizeText(textA);
+  const b = normalizeText(textB);
+  if (a.length < 30 || b.length < 30) return false;
+
+  const lenRatio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
+  if (lenRatio < 0.7) return false;
+
+  const wordsA = a.split(" ");
+  const wordsB = new Set(b.split(" "));
+  let matches = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) matches++;
+  }
+  const similarity = matches / Math.max(wordsA.length, wordsB.size);
+  return similarity > 0.75;
+}
+
 export async function loadAllPages(projectId: string): Promise<StoredPage[]> {
   const pDir = pageDir(projectId);
   if (!existsSync(pDir)) return [];
@@ -101,7 +123,19 @@ export async function loadAllPages(projectId: string): Promise<StoredPage[]> {
     }
   }
 
-  return pages.sort((a, b) => a.captureOrder - b.captureOrder);
+  pages.sort((a, b) => a.captureOrder - b.captureOrder);
+
+  const deduped: StoredPage[] = [];
+  for (const page of pages) {
+    const isDuplicate = deduped.some((existing) => {
+      return areSimilarPages(page.text, existing.text);
+    });
+    if (!isDuplicate) {
+      deduped.push(page);
+    }
+  }
+
+  return deduped;
 }
 
 export async function ensureOutputDir(projectId: string): Promise<string> {

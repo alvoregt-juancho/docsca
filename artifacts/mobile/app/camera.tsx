@@ -55,6 +55,7 @@ export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const [capturing, setCapturing] = useState(false);
+  const capturingRef = useRef(false);
   const [queue, setQueue] = useState<QueuedPhoto[]>([]);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
@@ -93,41 +94,20 @@ export default function CameraScreen() {
     }
   }, [queue.length, processQueue]);
 
-  const cropToFrame = async (uri: string, photoW: number, photoH: number): Promise<string> => {
-    const scaleToFill = Math.max(SCREEN_W / photoW, SCREEN_H / photoH);
-
-    const visibleW = SCREEN_W / scaleToFill;
-    const visibleH = SCREEN_H / scaleToFill;
-    const cropOffsetX = (photoW - visibleW) / 2;
-    const cropOffsetY = (photoH - visibleH) / 2;
-
-    const framePhotoX = Math.max(0, Math.round(cropOffsetX + FRAME_X / scaleToFill));
-    const framePhotoY = Math.max(0, Math.round(cropOffsetY + FRAME_Y / scaleToFill));
-    const framePhotoW = Math.min(Math.round(FRAME_W / scaleToFill), photoW - framePhotoX);
-    const framePhotoH = Math.min(Math.round(FRAME_H / scaleToFill), photoH - framePhotoY);
-
+  const preparePhoto = async (uri: string): Promise<string> => {
     const result = await manipulateAsync(
       uri,
-      [
-        {
-          crop: {
-            originX: framePhotoX,
-            originY: framePhotoY,
-            width: framePhotoW,
-            height: framePhotoH,
-          },
-        },
-        { resize: { width: 1500 } },
-      ],
-      { compress: 0.88, format: SaveFormat.JPEG, base64: true },
+      [{ resize: { width: 1500 } }],
+      { compress: 0.90, format: SaveFormat.JPEG, base64: true },
     );
 
-    if (!result.base64) throw new Error("No se pudo recortar la imagen");
+    if (!result.base64) throw new Error("No se pudo procesar la imagen");
     return result.base64;
   };
 
   const handleCapture = async () => {
-    if (!cameraRef.current || capturing) return;
+    if (!cameraRef.current || capturingRef.current) return;
+    capturingRef.current = true;
     setCapturing(true);
     try {
       const result = await cameraRef.current.takePictureAsync({
@@ -135,17 +115,19 @@ export default function CameraScreen() {
         exif: true,
       });
       if (!result) {
+        capturingRef.current = false;
         setCapturing(false);
         return;
       }
 
-      const base64 = await cropToFrame(result.uri, result.width, result.height);
+      const base64 = await preparePhoto(result.uri);
 
       const id = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       setQueue((prev) => [...prev, { id, base64 }]);
     } catch {
       Alert.alert("Error", "No se pudo tomar la foto. Intenta de nuevo.");
     }
+    capturingRef.current = false;
     setCapturing(false);
   };
 
